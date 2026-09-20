@@ -312,12 +312,31 @@ class Fsbhoa_Import_V2
                 }
             }
             
-            // If a manually created user exists, prevent the import from creating a duplicate.
+            // If a manually created user exists with an EXACT name match, promote it to an import record
+            // and turn off the manual flag so it transitions seamlessly into the managed lifecycle.
             if ($db_cardholder->origin !== 'import' && in_array(strtolower(trim($db_cardholder->first_name)) . ' ' . strtolower(trim($db_cardholder->last_name)), $new_full_names)) {
-                $new_cardholders_from_row = array_filter($new_cardholders_from_row, function($new_ch) use ($db_cardholder) {
-                    $new_ch_full_name = strtolower(trim($new_ch['first_name'])) . ' ' . strtolower(trim($new_ch['last_name']));
-                    return $new_ch_full_name !== strtolower(trim($db_cardholder->first_name)) . ' ' . strtolower(trim($db_cardholder->last_name));
-                });
+
+                if (!$is_dry_run) {
+                    $update_fields = [
+                        'origin'            => 'import',
+                        'import_first_name' => trim($db_cardholder->first_name),
+                        'import_last_name'  => trim($db_cardholder->last_name),
+                    ];
+
+                    $this->wpdb->update(
+                        $this->table_cardholders,
+                        $update_fields,
+                        ['id' => $db_cardholder->id]
+                    );
+
+                    // Update the in-memory object for subsequent steps in this run
+                    $db_cardholder->origin            = 'import';
+                    $db_cardholder->import_first_name = trim($db_cardholder->first_name);
+                    $db_cardholder->import_last_name  = trim($db_cardholder->last_name);
+                }
+
+                // Keep the record in $new_cardholders_from_row so apply_changes_to_db()
+                // can match it via import_first_name / import_last_name and sync contact details.
             }
         }
 
