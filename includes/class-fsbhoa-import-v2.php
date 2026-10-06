@@ -91,9 +91,11 @@ class Fsbhoa_Import_V2
                 <p>This tool imports or synchronizes all data for addresses, owners, and tenants 
                    from a single CSV file extracted from the property management database. 
                    Any resident that is defined in this file will be added to our access control 
-                   database (See Cardholders). Any resident that is not in this CSV file but is 
-                   in our access control database will be archived (see Archived Cardholders), 
-                   unless that record is marked with an override. 
+                   database (See Cardholders). Any imported resident that is not in this CSV file
+                   but is in our access control database will be archived (see Archived Cardholders).
+                   Manually added cardholders are never archived by the import. If a manually
+                   added cardholder's name exactly matches the formal name in the CSV, that
+                   record is promoted to an imported record.
                     <a href="#" id="open-csv-info-dialog" style="text-decoration: underline;">More info on CSV file content.</a>
                 </p>
 
@@ -233,6 +235,9 @@ class Fsbhoa_Import_V2
                 $existing_db_cardholders = $this->get_cardholders_by_property($property_id);
                 $this->sync_property_occupants($new_cardholders_from_row, $existing_db_cardholders, $property_id, $stats, $is_dry_run);
                 $this->apply_changes_to_db($new_cardholders_from_row, $property_id, $property_address_raw, $stats, $is_dry_run, $mismatched_contacts);
+                if (!$is_dry_run) {
+                    $this->ensure_household_primaries($property_id);
+                }
 
             } catch (Exception $e) {
                 $stats['errors'][] = "Row " . ($stats['rows_processed'] + 1) . ": " . $e->getMessage();
@@ -333,6 +338,16 @@ class Fsbhoa_Import_V2
                     $db_cardholder->origin            = 'import';
                     $db_cardholder->import_first_name = trim($db_cardholder->first_name);
                     $db_cardholder->import_last_name  = trim($db_cardholder->last_name);
+                } else {
+                    // In a dry run the promotion isn't written, so apply_changes_to_db() can't find
+                    // this record by import name. Flag the matching entry so it isn't counted as new.
+                    $promoted_name = strtolower(trim($db_cardholder->first_name)) . ' ' . strtolower(trim($db_cardholder->last_name));
+                    foreach ($new_cardholders_from_row as &$new_cardholder) {
+                        if (strtolower(trim($new_cardholder['import_first_name'])) . ' ' . strtolower(trim($new_cardholder['import_last_name'])) === $promoted_name) {
+                            $new_cardholder['dry_run_promoted'] = true;
+                        }
+                    }
+                    unset($new_cardholder);
                 }
 
                 // Keep the record in $new_cardholders_from_row so apply_changes_to_db()
@@ -385,17 +400,18 @@ private function parse_cardholders_from_row($row)
         
         $phones_str = $this->get_value_from_row($row, ['phone', 'phonenumber']);
         $phones_str_cleaned = str_replace(':', ',', $phones_str);
-        $owner_phones = !empty($phones_str_cleaned) ? array_map('trim', explode(',', $phones_str_cleaned)) : [];
+        $owner_phones = $this->split_positional_list($phones_str_cleaned);
         
         $emails_str = $this->get_value_from_row($row, ['email', 'emailaddress']);
-        $owner_emails = !empty($emails_str) ? array_map('trim', explode(',', $emails_str)) : [];
+        $owner_emails = $this->split_positional_list($emails_str);
 
         $tenant_names_str = $this->get_value_from_row($row, ['tenant name(s)', 'tenantname(s)', 'tenant_name(s)']);
         $tenant_emails_str = $this->get_value_from_row($row, ['tenant email(s)', 'tenantemail(s)', 'tenant_email(s)']);
         $tenant_phones_str = $this->get_value_from_row($row, ['tenant phone(s)', 'tenantphone(s)', 'tenant_phone(s)']);
 
         // Owner 1
-        if (!empty($owner1_first) && !empty($owner1_last)) {
+        // A missing first or last name doesn't skip the owner; only a fully blank name does
+        if (trim($owner1_first) !== '' || trim($owner1_last) !== '') {
             $email1 = $owner_emails[0] ?? '';
             $parsed_cardholders[] = [
                 'first_name'        => trim($owner1_first),
@@ -412,7 +428,8 @@ private function parse_cardholders_from_row($row)
         }
 
         // Owner 2
-        if (!empty($owner2_first) && !empty($owner2_last)) {
+        // A missing first or last name doesn't skip the owner; only a fully blank name does
+        if (trim($owner2_first) !== '' || trim($owner2_last) !== '') {
             $email2 = $owner_emails[1] ?? '';
             $parsed_cardholders[] = [
                 'first_name'        => trim($owner2_first),
@@ -430,20 +447,18 @@ private function parse_cardholders_from_row($row)
 
         // Tenants
         if (!empty($tenant_names_str)) {
-            // Split by comma, newline (\n or \r), or any variation of <br> tags
-            $split_pattern = '/(,|[\n\r]|<br\s*\/?>|<\/br>)/i';
-            $tenant_names = preg_split($split_pattern, $tenant_names_str, -1, PREG_SPLIT_NO_EMPTY);
-            $tenant_names = array_map('trim', $tenant_names);
-            $tenant_emails = preg_split($split_pattern, $tenant_emails_str, -1, PREG_SPLIT_NO_EMPTY);
-            $tenant_emails = array_map('trim', $tenant_emails);
+            // Names, emails and phones are matched up by position, so empty slots must be kept
+            $tenant_names = $this->split_positional_list($tenant_names_str);
+            $tenant_emails = $this->split_positional_list($tenant_emails_str);
             $tenant_phones_str_cleaned = str_replace(':', ',', $tenant_phones_str);
-            $tenant_phones = preg_split($split_pattern, $tenant_phones_str_cleaned, -1, PREG_SPLIT_NO_EMPTY);
-            $tenant_phones = array_map('trim', $tenant_phones);
+            $tenant_phones = $this->split_positional_list($tenant_phones_str_cleaned);
 
             foreach ($tenant_names as $index => $name) {
-                $name_parts = array_filter(explode(' ', trim($name)));
-                if (count($name_parts) < 2) continue;
+                // An empty slot holds a position in the lists but has no tenant to create
+                $name_parts = preg_split('/\s+/', $name, -1, PREG_SPLIT_NO_EMPTY);
+                if (empty($name_parts)) continue;
 
+                // The last word is the last name; a single-word name becomes the last name alone
                 $last_name = array_pop($name_parts);
                 $first_name = implode(' ', $name_parts);
                 $tenant_email = $tenant_emails[$index] ?? '';
@@ -540,7 +555,42 @@ error_log("[IMPORT DEBUG] DID NOT FIND a property record. Will attempt to create
                 }
             }
             $stats['properties_created']++;
-            return $this->wpdb->insert_id;
+            // In a dry run nothing was inserted, so insert_id is stale from an earlier query.
+            // Return a placeholder ID that matches no property, so the row is treated as all-new.
+            return $is_dry_run ? -1 : $this->wpdb->insert_id;
+        }
+    }
+
+    /**
+     * Makes sure every household at a property has a current Primary.
+     * A household with no Primary, or whose Primary is archived, purged or missing, gets its
+     * lowest-id member that is 'active' or 'inactive'. This covers the first resident of a new
+     * household and a Primary that this import just archived.
+     * @param int $property_id The property whose households to check.
+     */
+    private function ensure_household_primaries($property_id) {
+        $result = $this->wpdb->query($this->wpdb->prepare(
+            "UPDATE ac_households AS h
+             JOIN (
+                 SELECT household_id, MIN(id) AS first_id
+                 FROM {$this->table_cardholders}
+                 WHERE cardholder_status IN ('active', 'inactive')
+                   AND household_id IN (
+                       SELECT household_id FROM {$this->table_cardholders}
+                       WHERE property_id = %d AND household_id IS NOT NULL
+                   )
+                 GROUP BY household_id
+             ) AS m ON m.household_id = h.household_id
+             LEFT JOIN {$this->table_cardholders} AS p ON p.id = h.primary_cardholder_id
+             SET h.primary_cardholder_id = m.first_id
+             WHERE h.primary_cardholder_id IS NULL
+                OR p.id IS NULL
+                OR p.cardholder_status IN ('archived', 'purged')",
+            $property_id
+        ));
+
+        if ($result === false) {
+            throw new Exception("DB error setting household Primary for property ID {$property_id}: " . $this->wpdb->last_error);
         }
     }
 
@@ -556,6 +606,10 @@ error_log("[IMPORT DEBUG] DID NOT FIND a property record. Will attempt to create
     private function apply_changes_to_db($new_list, $property_id, $property_address, &$stats, $is_dry_run, &$mismatched_contacts)
     {
         foreach ($new_list as $cardholder_data) {
+            // Dry run only: an existing manual record that a live run would promote and then match
+            if (!empty($cardholder_data['dry_run_promoted'])) {
+                continue;
+            }
             $cardholder_data['property_id'] = $property_id;
             
             // Find existing records using the IMPORT names as the key
@@ -646,11 +700,17 @@ error_log("[IMPORT DEBUG] DID NOT FIND a property record. Will attempt to create
                 // INSERT new record
                 // The $cardholder_data array from parse_cardholders_from_row now contains all needed fields
 
-                // Find an existing household at this property (ignoring standalone types like Contractors)
+                // Find an existing household at this property (ignoring standalone types like Contractors).
+                // Only join a household that still has a current imported resident. A household left with
+                // only manual records (e.g. a new owner entered by hand before the PMS caught up) may belong
+                // to someone else, so the new resident gets a new household and an admin can merge later.
                 $existing_household = $this->wpdb->get_var($this->wpdb->prepare(
                     "SELECT household_id FROM {$this->table_cardholders}
                      WHERE property_id = %d
                        AND household_id IS NOT NULL
+                       AND cardholder_type = 'resident'
+                       AND cardholder_status IN ('active', 'inactive')
+                       AND origin = 'import'
                        AND resident_type NOT IN ('Contractor', 'Staff', 'Other', 'Emergency', 'Delivery')
                      LIMIT 1",
                     $property_id
@@ -708,6 +768,24 @@ $new_cardholder_id = $this->wpdb->insert_id;
         return $default;
     }
 
+
+    /**
+     * Splits a CSV list field into its entries, keeping empty slots so that parallel lists
+     * (tenant names, emails, phones) stay aligned by position.
+     * Entries are separated by a comma or a line break (\n, \r\n or any <br> tag variant).
+     * A comma next to a line break, or several line breaks together, count as one separator;
+     * two commas in a row mark an empty entry.
+     * @param string $value The raw field value.
+     * @return array The trimmed entries, or an empty array if the field is blank.
+     */
+    private function split_positional_list($value) {
+        $value = preg_replace('/<\/?br\s*\/?>/i', "\n", (string) $value);
+        $value = trim($value);
+        if ($value === '') {
+            return [];
+        }
+        return array_map('trim', preg_split('/\s*,\s*|\s*\n\s*/', $value));
+    }
 
     private function normalize_phone($phone) { 
         $digits = preg_replace('/[^0-9]/', '', $phone); 
@@ -773,7 +851,18 @@ $new_cardholder_id = $this->wpdb->insert_id;
             return false;
         }
 
-        $report_dir = '/mnt/shared/AccessControl/';
+        // The folder includes the environment name so the testbed never overwrites production's report.
+        // Fail closed if FSBHOA_AC_ENVIRONMENT is missing or unrecognized.
+        $report_dir = Fsbhoa_Import_Settings::environment_dir();
+        if ($report_dir === '') {
+            error_log('FSBHOA IMPORT: Mismatch report skipped: FSBHOA_AC_ENVIRONMENT is not defined in wp-config.php (expected one of: ' . implode(', ', Fsbhoa_Import_Settings::ENVIRONMENTS) . ').');
+            return "Error: FSBHOA_AC_ENVIRONMENT is not set in wp-config.php, so the report was not written.";
+        }
+
+        // Create the environment folder on first use
+        if (!is_dir($report_dir) && !wp_mkdir_p($report_dir)) {
+            return "Error: Could not create report directory {$report_dir}.";
+        }
 
         // Check if the NAS directory is writable by the web server user (e.g., www-data)
         if (!is_writable($report_dir)) {
@@ -805,7 +894,7 @@ $new_cardholder_id = $this->wpdb->insert_id;
 
         fclose($handle);
 
-        return "Y:/AccessControl/".$filename; // Return the full server path of the generated report
+        return $filepath; // Return the full server path of the generated report
     }
 }
 

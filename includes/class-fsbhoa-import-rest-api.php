@@ -61,9 +61,7 @@ class Fsbhoa_Import_REST_API {
         // If it's a dry run, we skip all the locking logic and just run the process.
         if ($is_dry_run) {
             try {
-                if (empty($file_path) || !file_exists($file_path) || !is_readable($file_path)) {
-                    throw new Exception('File path is missing, does not exist, or is not readable.', 400);
-                }
+                $file_path = $this->validate_import_file_path($file_path);
                 $importer = new Fsbhoa_Import_V2();
                 // Call the importer with the dry run flag set to true
                 $feedback = $importer->process_csv_file($file_path, true);
@@ -103,9 +101,7 @@ class Fsbhoa_Import_REST_API {
             $params = $request->get_json_params();
             $file_path = isset($params['file_path']) ? sanitize_text_field($params['file_path']) : '';
 
-            if (empty($file_path) || !file_exists($file_path) || !is_readable($file_path)) {
-                throw new Exception('File path is missing, does not exist, or is not readable.', 400);
-            }
+            $file_path = $this->validate_import_file_path($file_path);
 
             $importer = new Fsbhoa_Import_V2();
             $feedback = $importer->process_csv_file($file_path);
@@ -134,6 +130,32 @@ class Fsbhoa_Import_REST_API {
             $status_code = ($e->getCode() > 0) ? $e->getCode() : 500;
             return new WP_Error('import_failed', 'Error during import: ' . $e->getMessage(), ['status' => $status_code]);
         }
+    }
+
+    /**
+     * Checks that the requested CSV is a readable file inside this environment's import folder
+     * (see Fsbhoa_Import_Settings::environment_dir()), so the endpoint can't be pointed at any
+     * other file on the server, and the testbed never imports from production's folder.
+     * @param string $file_path The path sent by the caller.
+     * @return string The resolved real path of the file.
+     * @throws Exception If the environment is not set or the path is missing or outside the folder.
+     */
+    private function validate_import_file_path($file_path) {
+        $import_dir = Fsbhoa_Import_Settings::environment_dir();
+        if ($import_dir === '') {
+            error_log('FSBHOA IMPORT: REST import refused: FSBHOA_AC_ENVIRONMENT is not defined in wp-config.php (expected one of: ' . implode(', ', Fsbhoa_Import_Settings::ENVIRONMENTS) . ').');
+            throw new Exception('Imports are disabled: FSBHOA_AC_ENVIRONMENT is not set in wp-config.php.', 503);
+        }
+
+        $real_dir  = realpath($import_dir);
+        $real_file = ($file_path !== '') ? realpath($file_path) : false;
+        if ($real_file === false || !is_file($real_file) || !is_readable($real_file)) {
+            throw new Exception('File path is missing, does not exist, or is not readable.', 400);
+        }
+        if ($real_dir === false || strpos($real_file, rtrim($real_dir, '/') . '/') !== 0) {
+            throw new Exception("File must be inside the import folder {$import_dir}.", 403);
+        }
+        return $real_file;
     }
 
     /**

@@ -26,6 +26,9 @@ function fsbhoa_import_module_init() {
     // Load the classes
     require_once plugin_dir_path(__FILE__) . 'includes/class-fsbhoa-import-v2.php';
     require_once plugin_dir_path(__FILE__) . 'includes/class-fsbhoa-import-rest-api.php';
+    require_once plugin_dir_path(__FILE__) . 'includes/class-fsbhoa-import-settings.php';
+
+    new Fsbhoa_Import_Settings();
 
     // Register Shortcode
     add_shortcode('fsbhoa_import_form', 'fsbhoa_render_import_shortcode_v2');
