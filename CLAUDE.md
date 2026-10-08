@@ -42,13 +42,13 @@ The import doesn't store the raw address string from the property management sys
 
 The import groups all residents at the same property into one `ac_households` record. Membership is stored on the cardholder (`ac_cardholders.household_id`), not as a list in `ac_households`.
 
-When it inserts a new cardholder, the import looks for an existing household at that property among current imported residents only (`origin = 'import'`, `cardholder_type = 'resident'`, `cardholder_status` `active` or `inactive`).
+When it inserts a new cardholder, the import looks for an existing household at that property among current imported residents only (`origin = 'import'`, `cardholder_type = 'resident'`, `cardholder_status` `active`).
 - Archived cardholders keep their `household_id`, so without the status filter a new owner would join the previous owner's household.
 - Manual records are never archived, so without the origin filter a new owner would join a household left with only manual members. Such a manual record may be the same person entered by hand under a slightly different name, or someone else. The import can't tell, so it creates a new household, and an admin merges the near-duplicate records later.
 
 The lookup also ignores the non-resident types `Contractor`, `Staff`, `Other`, `Emergency` and `Delivery`. If it finds one, the cardholder joins it. If not, it creates a new household named "`<last name>` Household".
 
-The first resident in a household is its **Primary** (`ac_households.primary_cardholder_id`). After each property is processed, `ensure_household_primaries()` checks that property's households. Any household with no Primary, or whose Primary is archived, purged or missing, gets its lowest-id `active` or `inactive` member. A current Primary is never changed, so one chosen by hand in the UI is kept.
+The first resident in a household is its **Primary** (`ac_households.primary_cardholder_id`). After each property is processed, `ensure_household_primaries()` checks that property's households. Any household with no Primary, or whose Primary is archived, purged or missing, gets its lowest-id `active` member. A current Primary is never changed, so one chosen by hand in the UI is kept.
 
 Existing households get their Primary from the backfill in core's `fsbhoa_ac_core/migration.sql`, not from this plugin.
 

@@ -564,7 +564,7 @@ error_log("[IMPORT DEBUG] DID NOT FIND a property record. Will attempt to create
     /**
      * Makes sure every household at a property has a current Primary.
      * A household with no Primary, or whose Primary is archived, purged or missing, gets its
-     * lowest-id member that is 'active' or 'inactive'. This covers the first resident of a new
+     * lowest-id member that is 'active'. This covers the first resident of a new
      * household and a Primary that this import just archived.
      * @param int $property_id The property whose households to check.
      */
@@ -574,7 +574,7 @@ error_log("[IMPORT DEBUG] DID NOT FIND a property record. Will attempt to create
              JOIN (
                  SELECT household_id, MIN(id) AS first_id
                  FROM {$this->table_cardholders}
-                 WHERE cardholder_status IN ('active', 'inactive')
+                 WHERE cardholder_status = 'active'
                    AND household_id IN (
                        SELECT household_id FROM {$this->table_cardholders}
                        WHERE property_id = %d AND household_id IS NOT NULL
@@ -709,7 +709,7 @@ error_log("[IMPORT DEBUG] DID NOT FIND a property record. Will attempt to create
                      WHERE property_id = %d
                        AND household_id IS NOT NULL
                        AND cardholder_type = 'resident'
-                       AND cardholder_status IN ('active', 'inactive')
+                       AND cardholder_status = 'active'
                        AND origin = 'import'
                        AND resident_type NOT IN ('Contractor', 'Staff', 'Other', 'Emergency', 'Delivery')
                      LIMIT 1",

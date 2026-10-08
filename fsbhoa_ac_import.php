@@ -162,7 +162,7 @@ function fsbhoa_check_and_run_migrations() {
     $properties = $wpdb->get_results(
         "SELECT DISTINCT property_id 
          FROM ac_cardholders 
-         WHERE cardholder_status IN ('active', 'inactive') 
+         WHERE cardholder_status = 'active' 
            AND (resident_type != 'Landlord' OR resident_type IS NULL) 
            AND property_id > 0"
     );
@@ -179,7 +179,7 @@ function fsbhoa_check_and_run_migrations() {
             "SELECT last_name 
              FROM ac_cardholders 
              WHERE property_id = %d 
-               AND cardholder_status IN ('active', 'inactive') 
+               AND cardholder_status = 'active' 
                AND (resident_type != 'Landlord' OR resident_type IS NULL) 
              LIMIT 1", 
             $prop->property_id
@@ -196,7 +196,7 @@ function fsbhoa_check_and_run_migrations() {
                     "UPDATE ac_cardholders 
                      SET household_id = %d 
                      WHERE property_id = %d 
-                       AND cardholder_status IN ('active', 'inactive') 
+                       AND cardholder_status = 'active' 
                        AND (resident_type != 'Landlord' OR resident_type IS NULL)",
                     $new_household_id,
                     $prop->property_id
