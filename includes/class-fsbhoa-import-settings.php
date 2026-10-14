@@ -12,7 +12,7 @@ class Fsbhoa_Import_Settings {
 
     const ENVIRONMENTS        = ['testbed', 'production'];
     const FOLDER_OPTION       = 'fsbhoa_import_folder';
-    const FOLDER_DEFAULT      = '/mnt/shared/AccessControl';
+    const FOLDER_DEFAULT      = '/mnt/shared/Automation/Import';
     const CORE_GENERAL_PAGE   = 'fsbhoa_ac_main_menu';
     const CORE_OPTION_GROUP   = 'fsbhoa_general_options';
 
@@ -40,7 +40,7 @@ class Fsbhoa_Import_Settings {
         ?>
         <input type="text" name="<?php echo esc_attr(self::FOLDER_OPTION); ?>" id="<?php echo esc_attr(self::FOLDER_OPTION); ?>" value="<?php echo esc_attr($value); ?>" class="regular-text" />
         <p class="description">
-            Folder for import files: the AutoHotKey script places the CSV here and the import writes the
+            Folder for import files: the export script (scripts/export_and_trigger.py) places the CSV here and the import writes the
             contact mismatch report here. The environment name is appended,
             <?php if ($env) : ?>
                 so this server uses <code><?php echo esc_html(self::environment_dir()); ?></code>.

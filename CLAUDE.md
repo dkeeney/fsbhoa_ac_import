@@ -2,7 +2,9 @@ This plugin extends fsbhoa_ac_core.  @/home/pi/fsbhoa_ac_core/other_docs/ARCHITE
 
 ## Purpose
 
-Interface to the HOA's property management system. AutoHotKey scripts click through the property management system's web interface to export a `.csv` file. That file is copied to the NAS import folder (see [Import folder](#import-folder)), and the script then calls `POST /fsbhoa/v1/import/run` (authorized with the `X-API-KEY` header against the `fsbhoa_ac_api_key` option) to import it. `GET /fsbhoa/v1/import/status` reports the last run.
+Interface to the HOA's property management system (Vantaca). A Python/Selenium script, `scripts/export_and_trigger.py`, clicks through the property management system's web interface to export the Homeowner List and converts it to a `.csv` file. It copies that file to the NAS import folder (see [Import folder](#import-folder)), then calls `POST /fsbhoa/v1/import/run` (authorized with the `X-API-KEY` header against the `fsbhoa_ac_api_key` option) to import it. `GET /fsbhoa/v1/import/status` reports the last run.
+
+The script lives on the NAS, so it can be changed without visiting the office, and runs on the office PC `office3`, started by `scripts/PushToAccessControl.bat`. The copies in `scripts/` are kept so the scripts don't get lost. The repo version reads the Vantaca login and the import API key from Windows Credential Manager on office3 (Python's `keyring` package; store them with `--set-credentials`), so they are never in the script, on the NAS or in git. `--dry-run` runs a dry-run import. The office PCs share one Windows login, so any staff member at office3 could read the stored credentials; the protection is against the NAS, its backups and GitHub.
 
 The CSV has exactly one row per property. A property on two rows would be an error in the property management database; the import doesn't guard against it, and the second row would archive the imported residents from the first.
 
@@ -54,10 +56,12 @@ Existing households get their Primary from the backfill in core's `fsbhoa_ac_cor
 
 Imports support a dry-run mode that counts changes without writing them.
 
+Core's Diagnostics test suite runs this plugin's checks through the `fsbhoa_regression_test_steps` filter (`includes/class-fsbhoa-import-regression-test.php`): the environment's import folder exists and is writable, and a dry-run REST import of a one-row sample CSV (made-up address `9999 Test Way`, so nothing is counted as archived and no mismatch report is written) reports 1 row, 2 new cardholders and 0 archived.
+
 ## Import folder
 
-The `fsbhoa_import_folder` option (default `/mnt/shared/AccessControl`) sets the import folder, with the `FSBHOA_AC_ENVIRONMENT` value appended, e.g. `/mnt/shared/AccessControl/testbed/`. It appears as an "Import Settings" section on core's General Settings page (`includes/class-fsbhoa-import-settings.php`, `Fsbhoa_Import_Settings::environment_dir()`).
+The `fsbhoa_import_folder` option (default `/mnt/shared/Automation/Import`) sets the import folder, with the `FSBHOA_AC_ENVIRONMENT` value appended, e.g. `/mnt/shared/Automation/Import/testbed/`. `/mnt/shared/AccessControl` is for backups, not imports (changed 2026-10-14). It appears as an "Import Settings" section on core's General Settings page (`includes/class-fsbhoa-import-settings.php`, `Fsbhoa_Import_Settings::environment_dir()`).
 
-- `POST /fsbhoa/v1/import/run` only accepts a `file_path` inside this folder (checked with `realpath`). The AutoHotKey script must place the CSV there and pass that path.
+- `POST /fsbhoa/v1/import/run` only accepts a `file_path` inside this folder (checked with `realpath`). The export script must place the CSV there and pass that path.
 - When an active cardholder's phone or email differs from the CSV, the import writes `contact_mismatch_report.csv` to this folder.
 - If the environment is missing or unrecognized, both REST imports and the report are refused, and the reason is logged. Imports uploaded through the shortcode form still work, since they don't read from the NAS.
