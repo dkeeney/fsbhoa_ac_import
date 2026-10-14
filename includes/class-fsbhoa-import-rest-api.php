@@ -172,10 +172,10 @@ class Fsbhoa_Import_REST_API {
         } else {
             $response = $lock_data;
             if (isset($response['start_time'])) {
-                $response['start_time_human'] = date('Y-m-d H:i:s T', $response['start_time']);
+                $response['start_time_human'] = wp_date('Y-m-d H:i:s T', $response['start_time']);
             }
             if (isset($response['end_time'])) {
-                $response['end_time_human'] = date('Y-m-d H:i:s T', $response['end_time']);
+                $response['end_time_human'] = wp_date('Y-m-d H:i:s T', $response['end_time']);
             }
         }
         
